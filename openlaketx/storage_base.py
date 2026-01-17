@@ -1,6 +1,15 @@
 from pathlib import Path
 from typing import List, Union
 
+"""
+Low-level filesystem abstraction.
+
+This module was created to understand basic storage operations
+and is intentionally generic.
+
+The production data lake storage logic is implemented in
+storage_manager.py.
+"""
 
 
 
