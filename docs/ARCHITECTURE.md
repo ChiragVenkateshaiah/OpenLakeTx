@@ -1,185 +1,206 @@
-# OpenLakeTx - Architecture & Design
+# OpenLakeTx + LakeGuard
+## GCP Data Lakehouse Architecture (Industrial Standard)
 
-OpenLakeTx is a minimal, educational implementation of a Delta Lake-style transactional data lake, built in python on top of open-source technologies.
+## 1. Purpose of This Document
+This document defines the reference architecture for a production-grade GCP lakehouse platform built using:
+- OpenLakeTx - Transaction & consistency layer
+- LakeGuard - DataOps, observability, and trust layer
 
-This document explains:
-- The folder structure
-- The responsibilities of each module
-- Why each dependency was chosen
+It serves as:
+- A single source of truth
+- A design guardrail to prevent misalignment
+
+Any future design decisions should be validated against this document
 
 ---
 
-## 📁 Project Folder Structure
+## 2. Architectural Philosophy
+> Treat data like production software
 
-```text
-openlaketx/
-├── openlaketx/
-│   ├── __init__.py
-│   ├── table.py
-│   ├── commit.py
-│   ├── log.py
-│   ├── snapshot.py
-│   ├── storage.py
-│   └── gc.py
-├── cli/
-│   └── main.py
-├── tests/
-├── examples/
-├── README.md
-├── ARCHITECTURE.md
-└── pyproject.toml
+This platform is designed with separation of concerns:
+| Plane                 | Responsibility                   |
+| --------------------- | -------------------------------- |
+| **Storage Plane**     | Durable, low-cost object storage |
+| **Transaction Plane** | ACID, concurrency, versioning    |
+| **Operations Plane**  | Data quality, SLAs, trust        |
+| **Compute Plane**     | Batch, streaming, analytics      |
+| **Consumption Plane** | BI, ML, ad-hoc analysis          |
+
+---
+
+## 3. High-Level Architecture
+```pgsql
+┌───────────────────────────────────────────────┐
+│            BI / Analytics / ML                 │
+│     (Dashboards, notebooks, models)            │
+└───────────────────────────────────────────────┘
+                      ▲
+┌───────────────────────────────────────────────┐
+│                 Gold Layer                    │
+│     Business-ready aggregates & KPIs           │
+└───────────────────────────────────────────────┘
+                      ▲
+┌───────────────────────────────────────────────┐
+│                Silver Layer                   │
+│   Cleaned, validated, conformed datasets       │
+└───────────────────────────────────────────────┘
+                      ▲
+┌───────────────────────────────────────────────┐
+│                Bronze Layer                   │
+│   Raw, append-only, immutable ingestion        │
+└───────────────────────────────────────────────┘
+                      ▲
+┌───────────────────────────────────────────────┐
+│      OpenLakeTx (Transaction Layer)            │
+│  • ACID commits                               │
+│  • Optimistic concurrency                     │
+│  • Snapshot versioning                        │
+│  • Rollback & time travel                     │
+└───────────────────────────────────────────────┘
+                      ▲
+┌───────────────────────────────────────────────┐
+│      LakeGuard (DataOps Layer)                 │
+│  • Data quality rules                         │
+│  • Freshness & SLA enforcement                │
+│  • Failure detection                          │
+│  • Lineage & audits                           │
+└───────────────────────────────────────────────┘
+                      ▲
+┌───────────────────────────────────────────────┐
+│     Google Cloud Storage (GCS)                 │
+│   Open formats (Parquet + metadata logs)       │
+└───────────────────────────────────────────────┘
 ```
 
 ---
 
-## Core Package: `openlaketx/`
-This directory contains the **core engine** and is published as a Python package.
+## 4. Technology Stack (GCP)
+| Layer          | Technology               |
+| -------------- | ------------------------ |
+| Object Storage | **Google Cloud Storage** |
+| Compute        | **Dataproc** (Spark)     |
+| SQL Analytics  | **BigQuery**             |
+| Orchestration  | **Cloud Composer**       |
+| Monitoring     | **Cloud Monitoring**     |
+| Security       | **IAM**                  |
 
-### `table.py` - **Public API Layer**
-- Entry point for users
-- Exposes high-level operations such as:
-    - create table
-    - write data
-    - read data
-    - time travel
-- Abstracts away transaction logs and storage details
-> Similiar to `DeltaTable` in Delta Lake
 
----
-
-### `commit.py` - **Transaction Logic**
-- Handles wrtie transactions
-- Responsible for:
-    - optimistic concurrency control
-    - atomic commits
-    - version assignment
-- Ensures ACID-like guarantees on object storage
+> Important: BigQuery is a consumer, not the storage owner.
+> The lakehouse lives on GCS
 
 ---
 
-### `log.py` - **Transaction Log Management**
-- Reads and writes `_delta_log`-style JSON files
-- Stores actions such as:
-    - `add`
-    - `remove`
-    - `metadata`
-- Forms the **source of truth** for the table state
+## 5. OpenLakeTx -- Transaction & Control Plane
+### Role
+OpenLake provides transactional guarantees on object storage, similar to Delta Lake internals.
+
+### Responsibilities
+- Atomic multi-file commits
+- Optimistic concurrency control
+- Versioned snapshots
+- Schema validation & evolution
+- Failure-safe rollback
+
+### Storage Layout (Example)
+```pgsql
+/lake/orders/
+ ├── data/
+ │   ├── part-0001.parquet
+ │   └── part-0002.parquet
+ └── _openlaketx_log/
+     ├── 00000001.json
+     └── 00000002.json
+```
+If a Spark job fails mid-write:
+- Partial data is never exposed
+- Previous snapshot remains valid
+- Recovery is deterministic
 
 ---
 
-### `snapshot.py` **- Read Path & Version Resolution**
-- Computes table state at a given version
-- Merges log actions into a consistent snapshot
-- Supports:
-    - latest reads
-    - time travel reads
+## 6. LakeGuard -- DataOps & Trust Plane
+### Role
+LakeGuard ensures data reliability, observability, and trust after each commit.
+
+### Capabilities
+| Category     | Examples                           |
+| ------------ | ---------------------------------- |
+| Data Quality | Nulls, ranges, duplicates          |
+| Freshness    | “Silver.orders updated in ≤15 min” |
+| Volume       | Sudden spikes or drops             |
+| Schema       | Breaking changes                   |
+| Lineage      | Bronze → Silver → Gold             |
+
+## Validation Flow
+```pgsql
+Spark writes data
+        ↓
+OpenLakeTx commits snapshot
+        ↓
+LakeGuard validates snapshot
+        ↓
+❌ Failed → table marked unhealthy
+✅ Passed → downstream allowed
+```
 
 ---
 
-### `storage.py` - **Storage Abstraction Layer**
-- Abstracts filesystem operations
-- Currently supports:
-    - Google Cloud Storage (GCS)
-- Designed to be extensible for:
-    - local filesystem
-    - AWS S3
-    - Azure Blob Storage
-> Keeps business logic independent of storage backend
+## 7. Orchestration Flow (Production Style)
+### Cloud Composer (Airflow) DAG
+```markdown
+1. Ingest → Bronze
+2. OpenLakeTx commit
+3. LakeGuard quality checks
+4. Transform → Silver
+5. OpenLakeTx commit
+6. LakeGuard SLA validation
+7. Publish → Gold
+8. Notify BI / ML consumers
+```
+Every starge assumes failure is possible.
 
 ---
 
-### `gc.py` - **Garbage Collection (VACUUM)**
-- Identifies unreferenced Parquet files
-- Deletes old data safely
-- Mimics Delta Lake's `VACUUM` behavior
-
----
-## CLI Layer: `cli/`
-### `cli/main.py`
-- Command-line interface for OpenLakeTx
-- Built using Typer
-- Planned commands:
-    -`openlaketx init`
-    -`openlaketx history`
-    -`openlaketx vacuum`
+## 8. Security & Governance Model
+| Area           | Design                        |
+| -------------- | ----------------------------- |
+| Storage Access | GCS bucket IAM                |
+| Metadata       | Append-only transaction logs  |
+| Consumers      | Read-only roles               |
+| Audits         | Historical health & snapshots |
+| Compliance     | Reproducible data versions    |
 
 ---
 
-## Testing: `test/`
-- Unit tests for:
-    - commits
-    - snapshots
-    - conflict detection
-- Integration tests using local or GCS-backed storage
-- Uses `pytest`
+## 9. Why This is an Industrial-Grade Lakehouse
+Typical demo pipelines:
+- No transaction safety
+- No data trust layer
+- No SLA enforcement
+
+This platform:
+- Control plane (OpenLakeTx)
+- Operations plane (LakeGuard)
+- Compute plane (Spark/SQL)
+- Storage plane (GCS)
+
+This mirrors real-world data platforms
 
 ---
 
-## Examples: `examples/`
-- End-to-end usage examples
-- Demo scripts and notebooks
-- Useful for:
-    - learning
-    - documentation
-    - quick validation
+## 10. Intended Audience & Role Alignment
+| Role                   | Why This Architecture Fits  |
+| ---------------------- | --------------------------- |
+| DataOps Engineer       | SLAs, monitoring, failures  |
+| Data Platform Engineer | Control plane & governance  |
+| Lakehouse Engineer     | ACID on object storage      |
+| Cloud Data Engineer    | GCP-native, scalable design |
+
+
+## 11. Canonical Rule
+> If implementation deviates from this document, the implementation is wrong -- not the architecture.
+
+This README is the reference contract for all future work.
 
 ---
-
-## Dependency Choices & Rationale
-### Core Data & Storage
-| Dependency    | Reason                                                     |
-| ------------- | ---------------------------------------------------------- |
-| `pyarrow`     | Columnar data model, Parquet IO, schema handling           |
-| `pandas`      | Developer-friendly data creation and testing               |
-| `gcsfs`       | Native filesystem interface for Google Cloud Storage       |
-| `fastparquet` | Alternative Parquet writer for performance & compatibility |
-
----
-
-## Developer Experience
-| Dependency | Reason                              |
-| ---------- | ----------------------------------- |
-| `pytest`   | Reliable unit & integration testing |
-| `typer`    | Modern, type-safe CLI creation      |
-| `rich`     | Human-friendly terminal output      |
-
----
-
-## Design Principles
-- Log-first architecture
-- Immutable data files
-- Append-only transaction log
-- Storage-agnostic design
-- Minimal but extensible
-
----
-
-## Open Source Stack (Zero Cost)
-| Layer       | Choice                | Why                    |
-| ----------- | --------------------- | ---------------------- |
-| Language    | Python 3.10+          | Fast iteration         |
-| Storage     | Google Cloud Storage  | Object-store semantics |
-| File format | Parquet               | Columnar, standard     |
-| Metadata    | JSON → SQLite (later) | Simplicity             |
-| CLI         | argparse / typer      | Clean UX               |
-| Tests       | pytest                | Confidence             |
-| Formatting  | black + ruff          | Professional           |
-| Packaging   | poetry / pip          | Clean deps             |
-
----
-
-## Future Enhancements
-- Schema evolution
-- Z-order / data skipping
-- Streaming commits
-- S3 & Azure Blob support
-- Table-level metrics
-
----
-
-## Summary
-OpenLakeTx is designed to demonstrate a deep understanding of:
-- data lake internals
-- transactional systems
-- real-world data engineering design
 
