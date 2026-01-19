@@ -1,4 +1,4 @@
-# OpenLakeTx + LakeGuard
+# Open Lakehouse Platform (OpenLakeTx + LakeGuard)
 
 ## Platform-First GCP Data Lakehouse
 This repository contains a production-grade, platform-first data lakehouse design built on Google Cloud Platform(GCP)
