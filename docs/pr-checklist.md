@@ -142,8 +142,3 @@ Explain:
 > If a PR violates platform guarantees, it must be rejected -- even if it "works".
 
 --
-
-## Reference Documents
-- [docs/ARCHITECTURE.md](/docs/ARCHITECTURE.md)
-- [docs/design-decisions.md](/docs/design-decisions.md)
-- [docs/pr-checklist.md](/docs/pr-checklist.md)

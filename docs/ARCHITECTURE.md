@@ -196,6 +196,15 @@ This mirrors real-world data platforms
 | Lakehouse Engineer     | ACID on object storage      |
 | Cloud Data Engineer    | GCP-native, scalable design |
 
+---
+
+## Governance & Change Management
+
+
+All changes to this platform **must** comply with the
+[Pull Request Checklist](pr-checklist.md).
+
+
 
 ## 11. Canonical Rule
 > If implementation deviates from this document, the implementation is wrong -- not the architecture.
