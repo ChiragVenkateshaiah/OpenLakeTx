@@ -94,4 +94,4 @@ Host linux-workshop-vm
 This issue reinforced important cloud fundamentals:
 - VM lifecycle impacts networking
 - SSH failures are often network or identity-related
-- Clean, determiinistic setups reduce operational risk
+- Clean, deterministic setups reduce operational risk
